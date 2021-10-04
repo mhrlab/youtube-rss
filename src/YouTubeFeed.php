@@ -12,79 +12,70 @@
 
 class Feed
 {
+
   /** @var int */
-  public static $cacheExpire = '1 day';
+  public $cacheExpire = '5 hour';
 
   /** @var string */
-  public static $cacheDir;
+  public $cacheDir ;
 
   /** @var string */
   public static $userAgent = 'FeedFetcher-Google';
 
   /** @var SimpleXMLElement */
   protected $xml;
+  private $feedArray;
+
+  public $time_zone = 'asia/kolkata';
+  public $datetime_format = 'Y-m-d\TH:i:sP';
+
+  public  $error = false;
+  public  $errorMessage = null;
 
 
-  /**
-   * Loads RSS or Atom feed.
-   * @param  string
-   * @param  string
-   * @param  string
-   * @return Feed
-   * @throws FeedException
-   */
-  public static function load($url, $user = null, $pass = null)
-  {
-    $xml = self::loadXml($url, $user, $pass);
-    if ($xml->channel) {
-      return self::fromRss($xml);
-    }else{
-      return  null;
-    }
+
+  function __construct($url = null){
+    if (!is_null($url)) $this->loadRss($url);
   }
-
-
   /**
    * Loads RSS feed.
-   * @param  string  RSS feed URL
-   * @param  string  optional username
-   * @param  string  optional password
-   * @return Feed
-   * @throws FeedException
+   * @param string  RSS feed URL
+   * @param string  optional username
+   * @param string  optional password
+   * @return bool
    */
-  public static function loadRss($url, $user = null, $pass = null)
+  public function loadRss($url, $user = null, $pass = null): bool
   {
-    return self::fromRss(self::loadXml($url, $user, $pass));
+    if (empty($url)){
+      return $this->genError("Sorry Please provide valid url.");
+    }
+
+    try {
+      return $this->fromRss($this->loadXml($url, $user, $pass));
+    } catch (FeedException $e) {
+      return $this->genError("Error: FeedException - ".$e->getMessage());
+    } catch (Exception $e) {
+      return $this->genError("Error: Exception - ".$e->getMessage());
+    }
   }
 
 
-
   /**
-   * @throws FeedException
+   * @param SimpleXMLElement $xml
+   * @return bool
    */
-  private static function fromRss(SimpleXMLElement $xml)
+  private  function fromRss(SimpleXMLElement $xml): bool
   {
-    if (!$xml->channel) {
-      throw new FeedException('Invalid feed.');
+    if (!$xml->entry) {
+      return $this->genError("Error: Invalid feed.");
     }
-
-    self::adjustNamespaces($xml);
-
-    foreach ($xml->channel->item as $item) {
-      // converts namespaces to dotted tags
-      self::adjustNamespaces($item);
-
-      // generate 'url' & 'timestamp' tags
-      $item->url = (string) $item->link;
-      if (isset($item->{'dc:date'})) {
-        $item->timestamp = strtotime($item->{'dc:date'});
-      } elseif (isset($item->pubDate)) {
-        $item->timestamp = strtotime($item->pubDate);
-      }
+    try {
+      return $this->generateFeedArray($xml);
+    } catch (FeedException $e) {
+      return $this->genError("Error while generating xml array");
+    } catch (Exception $e) {
+      return $this->genError("Error while generating xml array");
     }
-    $feed = new self;
-    $feed->xml = $xml->channel;
-    return $feed;
   }
 
 
@@ -114,30 +105,28 @@ class Feed
 
 
   /**
-   * Converts a SimpleXMLElement into an array.
-   * @param  SimpleXMLElement
+   * Return Feed array.
    * @return array
    */
-  public function toArray(SimpleXMLElement $xml = null)
+  public function toArray(): array
   {
-    if ($xml === null) {
-      $xml = $this->xml;
-    }
+    return $this->feedArray;
+  }
 
-    if (!$xml->children()) {
-      return (string) $xml;
+  /**
+   * Return Feed into json.
+   * @param bool $print
+   * @return false|string
+   */
+  public function toJSON(bool $print)
+  {
+    if ($print){
+      header('content-type: application/json');
+      echo json_encode($this->feedArray,JSON_PRETTY_PRINT);
+      return null;
+    }else{
+      return json_encode($this->feedArray,JSON_PRETTY_PRINT);
     }
-
-    $arr = [];
-    foreach ($xml->children() as $tag => $child) {
-      if (count($xml->$tag) === 1) {
-        $arr[$tag] = $this->toArray($child);
-      } else {
-        $arr[$tag][] = $this->toArray($child);
-      }
-    }
-
-    return $arr;
   }
 
 
@@ -147,27 +136,32 @@ class Feed
    * @param string
    * @param string
    * @return SimpleXMLElement
-   * @throws FeedException
    * @throws Exception
    */
-  private static function loadXml($url, $user, $pass)
+  private function loadXml($url, $user, $pass): SimpleXMLElement
   {
-    $e = self::$cacheExpire;
-    $cacheFile = self::$cacheDir . '/feed.' . md5(serialize(func_get_args())) . '.xml';
+    $e = $this->cacheExpire;
+    $cacheFile =$this->cacheDir . '/feed.' . md5(serialize(func_get_args())) . '.xml';
 
-    if (self::$cacheDir
+    if ($this->cacheDir
       && (time() - @filemtime($cacheFile) <= (is_string($e) ? strtotime($e) - time() : $e))
       && $data = @file_get_contents($cacheFile)
     ) {
+      $this->genStaticConfig(true,@filemtime($cacheFile));
+
       // ok
     } elseif ($data = trim(self::httpRequest($url, $user, $pass))) {
-      if (self::$cacheDir) {
+
+     $this->genStaticConfig(false,time());
+
+      if ($this->cacheDir) {
+        $this->genCacheDir();
         file_put_contents($cacheFile, $data);
       }
-    } elseif (self::$cacheDir && $data = @file_get_contents($cacheFile)) {
+    } elseif ($this->cacheDir && $data = @file_get_contents($cacheFile)) {
       // ok
     } else {
-      throw new FeedException('Cannot load feed.');
+      $this->genError('Cannot load feed.');
     }
 
     return new SimpleXMLElement($data, LIBXML_NOWARNING | LIBXML_NOERROR | LIBXML_NOCDATA);
@@ -190,10 +184,13 @@ class Feed
         curl_setopt($curl, CURLOPT_USERPWD, "$user:$pass");
       }
       curl_setopt($curl, CURLOPT_USERAGENT, self::$userAgent); // some feeds require a user agent
+
       curl_setopt($curl, CURLOPT_HEADER, false);
       curl_setopt($curl, CURLOPT_TIMEOUT, 20);
       curl_setopt($curl, CURLOPT_ENCODING, '');
+
       curl_setopt($curl, CURLOPT_RETURNTRANSFER, true); // no echo, just return result
+
       if (!ini_get('open_basedir')) {
         curl_setopt($curl, CURLOPT_FOLLOWLOCATION, true); // sometime is useful :)
       }
@@ -218,19 +215,98 @@ class Feed
     }
   }
 
-
   /**
    * Generates better accessible namespaced tags.
-   * @param  SimpleXMLElement
-   * @return void
+   * @param SimpleXMLElement
+   * @return bool
+   * @throws Exception
    */
-  private static function adjustNamespaces($el)
+  private function generateFeedArray($el): bool
   {
-    foreach ($el->getNamespaces(true) as $prefix => $ns) {
-      $children = $el->children($ns);
-      foreach ($children as $tag => $content) {
-        $el->{$prefix . ':' . $tag} = $content;
-      }
+
+
+
+    $this->feedArray['id']      = str_replace('yt:channel:','',(string)$el->id);
+    $this->feedArray['title']   = (string)$el->title;
+    $this->feedArray['link']    = (string)$el->link[1]->attributes()->href;
+    $this->feedArray['pubDate'] = $this->UTCtoTimeZone((string)$el->published);
+
+
+
+    $feed_items = [];
+    foreach ($el->entry as $entry){
+      $yt_child     = $entry->children('yt',true);
+      $media_child  = $entry->children('media',true)->group;
+      $community    = $media_child->community;
+
+      $pubDate = $this->UTCtoTimeZone((string)$entry->published);
+      $upDate = $this->UTCtoTimeZone((string)$entry->updated);
+
+      $video_id = (string)$yt_child->videoId;
+      $feed_items[] = array(
+        "guid"        => (string)$entry->id,
+        'id'          => $video_id,
+        'title'       => (string)$entry->title,
+        'description' => (string)$media_child->description,
+        'link'        => "https://www.youtube.com/watch?v=$video_id",
+        'img'         => 'https://img.youtube.com/vi/'.$video_id.'/maxresdefault.jpg',
+        'thumb'       => 'https://img.youtube.com/vi/'.$video_id.'/hqdefault.jpg',
+        "author"      =>  (string)$entry->author->name,
+        "author_uri"  =>  (string)$entry->author->uri,
+        "channel_title" => (string)$el->title,
+        "channel_id"    => (string)$yt_child->channelId,
+        'pubDate'     => $pubDate,
+        'upDate'      => $upDate,
+        'views'       => (int)$community->statistics->attributes()['views'],
+        'ratings_count' => (int)$community->starRating->attributes()['count'],
+        'ratings_avg' => (float)$community->starRating->attributes()['average'],
+
+      );
+
+    }
+    $this->feedArray['items'] = $feed_items;
+
+    return !empty($this->feedArray);
+
+  }
+
+  /**
+   * @param $date_time
+   * @return string
+   * @throws Exception
+   */
+  private function UTCtoTimeZone($date_time): string
+  {
+    $date_time = new DateTime($date_time, new DateTimeZone('UTC'));
+    $date_time->setTimezone(new DateTimeZone($this->time_zone));
+    return $date_time->format($this->datetime_format);
+  }
+
+
+  /**
+   * @throws Exception
+   */
+  private function genStaticConfig($isCached = false, $mtime=''){
+    $this->feedArray['config']['cache'] = $isCached;
+    $this->feedArray['config']['mtime'] = $this->UTCtoTimeZone(date($this->datetime_format,$mtime));
+  }
+
+  /**
+   * @param string $errorMessage
+   * @return bool
+   */
+  private function genError(string $errorMessage): bool
+  {
+    $this->error = true;
+    $this->errorMessage = $errorMessage;
+
+//    return reverse value then error for confirmation;
+    return !$this->error;
+  }
+
+  private function genCacheDir(){
+    if (!file_exists($this->cacheDir)) {
+      mkdir($this->cacheDir, 0777, true);
     }
   }
 }

@@ -1,25 +1,26 @@
 {
   "name": "mhrlab/youtube-rss",
   "description": "Small and easy-to-use library for consuming YouTube feeds",
-  "homepage": "https://github.com/mhrlab/youtube-rss",
-  "minimum-stability": "dev",
+  "keywords": ["php","rss","youtube-rss","youtube-feed"],
+  "version":  "v1.0.0",
   "license": "MIT",
+  "homepage": "https://github.com/mhrlab/youtube-rss",
   "authors": [
     {
-      "name": "Hemant Kumar",
-      "email": "meenahemantkr@gmail.com",
-      "role": "Developer"
+      "name": "Hemant kumar",
+      "email": "meenahemantkr@gmail.com"
     }
   ],
   "require": {
     "php": "^7.0",
     "ext-curl": "*",
     "ext-simplexml": "*",
-    "ext-libxml": "*"
+    "ext-libxml": "*",
+    "ext-json": "*"
   },
   "autoload": {
-    "psr-4": {
-      "YT-Rss\\": "src/"
-    }
-  }
+     "classmap": ["src/"]
+  },
+  "minimum-stability": "dev",
+  "prefer-stable": true
 }
